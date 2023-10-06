@@ -56,12 +56,19 @@ class LinearKernel(BaseKernel):
     def is_inf_dimensional(self):
         return False
 
-    def __call__(self, X, Y=None):
+    def __call__(self, X, Y=None, normalize=False):
         X = self._check_dims(X)
         Y = self._check_dims(Y)
         if Y is None:
-            return X @ X.T
-        return X @ Y.T
+            K = X @ X.T
+        else:
+            K = X @ Y.T
+
+        if normalize:
+            D = torch.diag((K.diag() ** (1/2)) ** -1)
+            K = D @ K @ D
+
+        return K
 
 class RBFKernel(BaseKernel):
     """
@@ -146,7 +153,7 @@ class LaplacianKernel(BaseKernel):
     def is_inf_dimensional(self):
         return False
 
-    def __call__(self, X, Y=None):
+    def __call__(self, X, Y=None, normalize=False):
         X = self._check_dims(X)
         Y = self._check_dims(Y)
 
@@ -157,7 +164,13 @@ class LaplacianKernel(BaseKernel):
             logging.info("Laplacian matrix is not provided, setting L=0")
             self.L = torch.zeros(X.shape[1], device=X.device).to_sparse()
 
-        return X @ (torch.eye(X.shape[1], device=X.device).to_sparse() + self.rho * self.L) @ Y.T
+        K = X @ (torch.eye(X.shape[1], device=X.device).to_sparse() + self.rho * self.L) @ Y.T
+
+        if normalize:
+            D = torch.diag((K.diag() ** (1 / 2)) ** -1)
+            K = D @ K @ D
+
+        return K
 
 class CorrelationKernel(BaseKernel):
     """

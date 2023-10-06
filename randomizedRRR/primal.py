@@ -2,10 +2,9 @@ from typing import Optional
 import numpy as np
 from scipy.linalg import eigh
 from scipy.sparse.linalg import eigsh
-from randomizedRRR.utils import topk
+from randomizedRRR.utils import topk, tonp, frnp
 from randomizedRRR.linalg import weighted_norm
 import torch
-from utils import tonp, frnp
 from torch import cholesky_solve
 from torch.linalg import cholesky
 

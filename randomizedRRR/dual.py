@@ -3,9 +3,8 @@ import logging
 import numpy as np
 from scipy.linalg import eig, eigh, LinAlgError, pinvh
 from scipy.sparse.linalg import eigs
-from randomizedRRR.utils import topk
+from randomizedRRR.utils import topk, tonp, frnp
 from randomizedRRR.linalg import modified_QR
-from utils import tonp, frnp
 import torch
 from torch import cholesky_solve
 from torch.linalg import cholesky
