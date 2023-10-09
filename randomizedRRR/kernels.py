@@ -61,12 +61,32 @@ class LinearKernel(BaseKernel):
         Y = self._check_dims(Y)
         if Y is None:
             K = X @ X.T
+            if normalize:
+                D = torch.diag((K.diag() ** (1 / 2)) ** -1)
+                K = D @ K @ D
         else:
             K = X @ Y.T
+            if normalize:
+                K_X = X @ X.T
+                D_row = torch.diag(1.0 / torch.sqrt(torch.diag(K_X)))
 
-        if normalize:
-            D = torch.diag((K.diag() ** (1/2)) ** -1)
-            K = D @ K @ D
+                K_Y = Y @ Y.T
+                D_col = torch.diag(1.0 / torch.sqrt(torch.diag(K_Y)))
+
+                K = D_row @ K @ D_col
+
+        # m, n = K.shape
+        #
+        # # Calculate the diagonal matrix D for row normalization (assuming m < n)
+        # K_X = torch.diag(X @ X.T)
+        # D_row = torch.diag(1.0 / torch.sqrt(torch.diag(K_X)))
+        #
+        # # Calculate the diagonal matrix D for column normalization (assuming m < n)
+        # column_diagonal = torch.diag(K.T)
+        # D_column = torch.diag(1.0 / torch.sqrt(column_diagonal))
+        #
+        # # Normalize the kernel matrix using row and column normalization
+        # K_normalized = torch.mm(torch.mm(D_row, K), D_column) #torch.mm(torch.mm(K, D_row), D_column).shape
 
         return K
 
@@ -157,18 +177,25 @@ class LaplacianKernel(BaseKernel):
         X = self._check_dims(X)
         Y = self._check_dims(Y)
 
-        if Y is None:
-            Y = X
-
         if self.L == None:
             logging.info("Laplacian matrix is not provided, setting L=0")
             self.L = torch.zeros(X.shape[1], device=X.device).to_sparse()
 
-        K = X @ (torch.eye(X.shape[1], device=X.device).to_sparse() + self.rho * self.L) @ Y.T
+        if Y is None:
+            K = X @ (torch.eye(X.shape[1], device=X.device).to_sparse() + self.rho * self.L) @ X.T
+            if normalize:
+                D = torch.diag((K.diag() ** (1 / 2)) ** -1)
+                K = D @ K @ D
+        else:
+            K = X @ Y.T
+            if normalize:
+                K_X = X @ (torch.eye(X.shape[1], device=X.device).to_sparse() + self.rho * self.L) @ X.T
+                D_row = torch.diag(1.0 / torch.sqrt(torch.diag(K_X)))
 
-        if normalize:
-            D = torch.diag((K.diag() ** (1 / 2)) ** -1)
-            K = D @ K @ D
+                K_Y = Y @ (torch.eye(X.shape[1], device=X.device).to_sparse() + self.rho * self.L) @ Y.T
+                D_col = torch.diag(1.0 / torch.sqrt(torch.diag(K_Y)))
+
+                K = D_row @ K @ D_col
 
         return K
 
