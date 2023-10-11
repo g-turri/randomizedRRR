@@ -90,34 +90,34 @@ def fit_reduced_rank_regression_tikhonov(
     K_Yn = K_Y * rsqrt_dim
 
     K = K_Yn @ K_Xn
-    # Find U via Generalized eigenvalue problem equivalent to the SVD. If K is ill-conditioned might be slow.
+    # Find V via Generalized eigenvalue problem equivalent to the SVD. If K is ill-conditioned might be slow.
     # Prefer svd_solver == 'randomized' in such a case.
     if svd_solver == 'arnoldi':
         # Adding a small buffer to the Arnoldi-computed eigenvalues.
-        sigma_sq, U = eigs(tonp(K, cuda), rank + 3, tonp(regularize(K_X, tikhonov_reg), cuda))
+        sigma_sq, V = eigs(tonp(K, cuda), rank + 3, tonp(regularize(K_X, tikhonov_reg), cuda))
     else:  # 'full'
-        sigma_sq, U = eig(tonp(K, cuda), tonp(regularize(K_X, tikhonov_reg), cuda))
+        sigma_sq, V = eig(tonp(K, cuda), tonp(regularize(K_X, tikhonov_reg), cuda))
 
-    max_imag_part = np.max(U.imag)
+    max_imag_part = np.max(V.imag)
     if max_imag_part >= 2.2e-10:
         logging.warn(f"The computed projector is not real. The Kernel matrix is severely ill-conditioned.")
-    U = np.real(U)
+    V = np.real(V)
 
-    # Post-process U. Promote numerical stability via additional QR decoposition if necessary.
-    U = U[:, topk(sigma_sq.real, rank).indices]
+    # Post-process V. Promote numerical stability via additional QR decoposition if necessary.
+    V = V[:, topk(sigma_sq.real, rank).indices]
 
     norm_inducing_op = (K_Xn @ (K_Xn.T)) + tikhonov_reg * K_X
-    U, _, columns_permutation = modified_QR(U, M=tonp(norm_inducing_op, cuda), column_pivoting=True)
-    U = U[:, np.argsort(columns_permutation)]
-    if U.shape[1] < rank:
+    V, _, columns_permutation = modified_QR(V, M=tonp(norm_inducing_op, cuda), column_pivoting=True)
+    V = V[:, np.argsort(columns_permutation)]
+    if V.shape[1] < rank:
         logging.warn(
-            f"The numerical rank of the projector is smaller than the selected rank ({rank}). {rank - U.shape[1]} "
+            f"The numerical rank of the projector is smaller than the selected rank ({rank}). {rank - V.shape[1]} "
             f"degrees of freedom will be ignored.")
-        _zeroes = np.zeros((U.shape[0], rank - U.shape[1]))
-        U = np.c_[U, _zeroes]
-        assert U.shape[1] == rank
-    U = frnp(U,device,dtype)
-    V = K_X @ U
+        _zeroes = np.zeros((V.shape[0], rank - V.shape[1]))
+        V = np.c_[V, _zeroes]
+        assert V.shape[1] == rank
+    V = frnp(V, device, dtype)
+    U = K_X @ V
     if _return_singular_values:
         return U, V, sigma_sq
     else:
