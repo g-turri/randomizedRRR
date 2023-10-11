@@ -1,8 +1,10 @@
 from typing import Optional
+from warnings import warn
+
 import numpy as np
 from numpy.typing import ArrayLike
 from sklearn.utils import check_array
-from warnings import warn
+
 
 def weighted_norm(A: ArrayLike, M: Optional[ArrayLike] = None):
     r"""Weighted norm of the columns of A.
@@ -23,12 +25,9 @@ def weighted_norm(A: ArrayLike, M: Optional[ArrayLike] = None):
     else:
         _A = np.dot(M, A)
         _A_T = np.dot(M.T, A)
-        norm = np.real(
-            np.sum(
-                0.5 * (np.conj(A) * _A + np.conj(A) * _A_T),
-                axis=0)
-        )
+        norm = np.real(np.sum(0.5 * (np.conj(A) * _A + np.conj(A) * _A_T), axis=0))
     return np.sqrt(norm)
+
 
 def weighted_dot_product(A: ArrayLike, B: ArrayLike, M: Optional[ArrayLike] = None):
     """Weighted dot product between the columns of A and B. The output will be equivalent to :math:`A^{*} M B`
@@ -54,8 +53,8 @@ def weighted_dot_product(A: ArrayLike, B: ArrayLike, M: Optional[ArrayLike] = No
 
 def _column_pivot(Q, R, k, squared_norms, columns_permutation):
     """
-        Helper function to perform column pivoting on the QR decomposition at the k iteration. No checks are performed.
-        For internal use only.
+    Helper function to perform column pivoting on the QR decomposition at the k iteration. No checks are performed.
+    For internal use only.
     """
     _arg_max = np.argmax(squared_norms[k:])
     j = k + _arg_max
@@ -69,7 +68,13 @@ def _column_pivot(Q, R, k, squared_norms, columns_permutation):
     return Q, R, squared_norms, columns_permutation
 
 
-def modified_QR(A: ArrayLike, M: Optional[ArrayLike] = None, column_pivoting: bool = False, rtol: float =2.2e-16, verbose: bool = False):
+def modified_QR(
+    A: ArrayLike,
+    M: Optional[ArrayLike] = None,
+    column_pivoting: bool = False,
+    rtol: float = 2.2e-16,
+    verbose: bool = False,
+):
     """Modified QR algorithm with column pivoting. Implementation follows the algorithm described in [1].
 
     Args:
@@ -85,7 +90,7 @@ def modified_QR(A: ArrayLike, M: Optional[ArrayLike] = None, column_pivoting: bo
     Returns:
         tuple: A tuple of the form (Q, R), where Q and R satisfy A = QR. If ``column_pivoting == True``, the permutation
          of the columns of A is returned as well.
-    
+
     [1] A. Dax: 'A modified Gram–Schmidt algorithm with iterative orthogonalization and column pivoting',
     https://doi.org/10.1016/S0024-3795(00)00022-7.
     """
@@ -99,17 +104,25 @@ def modified_QR(A: ArrayLike, M: Optional[ArrayLike] = None, column_pivoting: bo
     _roundoff = 1e-8  # From reference paper
     _tau = 1e-2  # From reference paper
 
-    if column_pivoting:  # Initialize variables for fast pivoting, without re-evaluation of the norm at each step.
+    if (
+        column_pivoting
+    ):  # Initialize variables for fast pivoting, without re-evaluation of the norm at each step.
         squared_norms = weighted_norm(Q, M=M) ** 2
         max_norm = np.sqrt(np.max(squared_norms))
         columns_permutation = np.arange(num_vecs)
 
     for k in range(num_vecs):
         if column_pivoting:
-            Q, R, squared_norms, columns_permutation = _column_pivot(Q, R, k, squared_norms, columns_permutation)
+            Q, R, squared_norms, columns_permutation = _column_pivot(
+                Q, R, k, squared_norms, columns_permutation
+            )
             norms_error_estimate = squared_norms * _roundoff
-        if k != 0:  # Reorthogonalization of the column k+1 of A with respect to the previous orthonormal k vectors.
-            alpha = weighted_dot_product(Q[:, :k], Q[:, k], M=M)  # alpha = Q[:,:k].T@M@Q[:,k]
+        if (
+            k != 0
+        ):  # Reorthogonalization of the column k+1 of A with respect to the previous orthonormal k vectors.
+            alpha = weighted_dot_product(
+                Q[:, :k], Q[:, k], M=M
+            )  # alpha = Q[:,:k].T@M@Q[:,k]
             R[:k, k] += alpha
             Q[:, k] -= np.dot(Q[:, :k], alpha)
 
@@ -122,24 +135,34 @@ def modified_QR(A: ArrayLike, M: Optional[ArrayLike] = None, column_pivoting: bo
                     warn(
                         "Numerical rank of A has been reached with a relative tolerance rtol = {:.2e}. "
                         "Effective rank = {}. Stopping Orthogonalization procedure.".format(
-                            rtol, effective_rank))
+                            rtol, effective_rank
+                        )
+                    )
                 break
                 # Normalization of the column k + 1
         R[k, k] = norm_at_iter_k
         Q[:, k] = Q[:, k] / R[k, k]
         # Orthogonalization of the remaining columns with respect to Q[:,k], i.e. the k+1 column of Q.
         if k < num_vecs - 1:
-            R[k, k + 1:] = weighted_dot_product(Q[:, k + 1:], Q[:, k], M=M)
-            Q[:, k + 1:] -= np.outer(Q[:, k], R[k, k + 1:])
+            R[k, k + 1 :] = weighted_dot_product(Q[:, k + 1 :], Q[:, k], M=M)
+            Q[:, k + 1 :] -= np.outer(Q[:, k], R[k, k + 1 :])
             # Try fast update of the squared norms, recompute if numerical criteria are not attained.
             if column_pivoting:
-                squared_norms[k + 1:] -= R[k, k + 1:] ** 2  # Update norms using Phythagorean Theorem
-                update_error_mask = _tau * squared_norms[k + 1:] < norms_error_estimate[
-                                                                   k + 1:]  # Check if the error estimate is too large
+                squared_norms[k + 1 :] -= (
+                    R[k, k + 1 :] ** 2
+                )  # Update norms using Phythagorean Theorem
+                update_error_mask = (
+                    _tau * squared_norms[k + 1 :] < norms_error_estimate[k + 1 :]
+                )  # Check if the error estimate is too large
                 if any(update_error_mask):
-                    squared_norms[k + 1:][update_error_mask] = weighted_norm(Q[:, k + 1:][:, update_error_mask],
-                                                                             M=M)  # Recompute the norms if necessary.
+                    squared_norms[k + 1 :][update_error_mask] = weighted_norm(
+                        Q[:, k + 1 :][:, update_error_mask], M=M
+                    )  # Recompute the norms if necessary.
     if column_pivoting:
-        return Q[:, :effective_rank], R[:effective_rank], columns_permutation[:effective_rank]
+        return (
+            Q[:, :effective_rank],
+            R[:effective_rank],
+            columns_permutation[:effective_rank],
+        )
     else:
         return Q[:, :effective_rank], R[:effective_rank]
