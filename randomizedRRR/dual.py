@@ -9,6 +9,7 @@ import torch
 from torch import cholesky_solve
 from torch.linalg import cholesky
 
+
 def fit_rand_reduced_rank_regression_tikhonov(
         K_X: torch.Tensor,  # Kernel matrix of the input data
         K_Y: torch.Tensor,  # Kernel matrix of the output data
@@ -25,50 +26,49 @@ def fit_rand_reduced_rank_regression_tikhonov(
     dtype = K_X.dtype
     device = K_X.device
     dim = K_X.shape[0]
-    inv_dim = dim ** -1
+    inv_dim = dim ** (-1.0)
+    alpha = dim * tikhonov_reg
+    K_reg = regularize(K_X, tikhonov_reg)
     l = rank + n_oversamples
     rng = np.random.default_rng(rng_seed)
-    L = K_Y * inv_dim
-    K = K_X * inv_dim
-    K_reg = K + torch.eye(dim, dtype=K.dtype, device=device) * tikhonov_reg
-
     if optimal_sketching:
-        Cov = L
-        Om = torch.tensor(rng.multivariate_normal(np.zeros(dim), tonp(Cov, cuda), size=l).T, dtype=K_X.dtype, device=device)
+        Cov = inv_dim * K_Y
+        Om = torch.tensor(rng.multivariate_normal(np.zeros(dim), tonp(Cov, cuda), size=l).T, dtype=dtype, device=device)
     else:
-        Om = torch.tensor(rng.standard_normal(size=(dim, l)), dtype=K_X.dtype, device = device)
+        Om = torch.tensor(rng.standard_normal(size=(dim, l)), dtype=dtype, device=device)
 
     for _ in range(iterated_power):
         # Powered randomized rangefinder
-        Omp = cholesky_solve(Om,cholesky(K_reg))
-        Om = L @ (Om - tikhonov_reg * Omp)
+        Omp = cholesky_solve(Om, cholesky(K_reg))
+        Om = (inv_dim * K_Y) @ (Om - alpha * Omp)
 
-    Omp = cholesky_solve(Om,cholesky(K_reg))
-    KOmp = Omp.T @ K
-    F_0 = KOmp @ Om
-    Om = L @ (Om - tikhonov_reg * Omp)
-    F_1 = KOmp @ Om
+    KOm = cholesky_solve(Om, cholesky(K_reg))
+    KOmp = Om - alpha * KOm
+
+    F_0 = (Om.T @ KOmp)
+    F_1 = (KOmp.T @ (inv_dim * (K_Y @ KOmp)))
 
     # Generation of matrices U and V.
     try:
-        sigma_sq, Q = eigh(tonp(F_1,cuda), tonp(F_0,cuda))
+        sigma_sq, Q = eigh(tonp(F_1, cuda), tonp(F_0, cuda))
     except LinAlgError:
-        sigma_sq, Q = eig(pinvh(tonp(F_0,cuda)) @ tonp(F_1,cuda))
+        sigma_sq, Q = eig(pinvh(tonp(F_0, cuda)) @ tonp(F_1, cuda))
 
-    sigma_sq, Q = frnp(sigma_sq, device, dtype), frnp(Q, device, dtype)
+    Q = frnp(Q, device, dtype)
 
     Q_norm = torch.sum(Q.conj() * (F_0 @ Q), axis=0)
     Q = Q @ torch.diag(Q_norm ** -0.5)
-    _idxs = topk(tonp(sigma_sq.real, cuda), rank).indices
+    _idxs = topk(sigma_sq.real, rank).indices
     sigma_sq = sigma_sq.real
 
-    Q[:, frnp(_idxs,device,dtype).to(dtype=torch.int)]
-    V = Omp @ Q
-    U = K @ V
+    Q = Q[:, _idxs.copy()]
+    V = (dim ** 0.5) * (KOm @ Q)
+    U = (dim ** 0.5) * (KOmp @ Q)
     if _return_singular_values:
         return U.real, V.real, sigma_sq
     else:
         return U.real, V.real
+
 
 def fit_reduced_rank_regression_tikhonov(
         K_X: torch.Tensor,  # Kernel matrix of the input data
@@ -99,8 +99,8 @@ def fit_reduced_rank_regression_tikhonov(
         sigma_sq, V = eig(tonp(K, cuda), tonp(regularize(K_X, tikhonov_reg), cuda))
 
     max_imag_part = np.max(V.imag)
-    if max_imag_part >= 2.2e-10:
-        logging.warn(f"The computed projector is not real. The Kernel matrix is severely ill-conditioned.")
+    if max_imag_part >= 10.0 * V.shape[0] * np.finfo(V.dtype).eps:
+        logging.warning(f"The computed projector is not real. The Kernel matrix is severely ill-conditioned.")
     V = np.real(V)
 
     # Post-process V. Promote numerical stability via additional QR decoposition if necessary.
@@ -110,7 +110,7 @@ def fit_reduced_rank_regression_tikhonov(
     V, _, columns_permutation = modified_QR(V, M=tonp(norm_inducing_op, cuda), column_pivoting=True)
     V = V[:, np.argsort(columns_permutation)]
     if V.shape[1] < rank:
-        logging.warn(
+        logging.warning(
             f"The numerical rank of the projector is smaller than the selected rank ({rank}). {rank - V.shape[1]} "
             f"degrees of freedom will be ignored.")
         _zeroes = np.zeros((V.shape[0], rank - V.shape[1]))
@@ -122,6 +122,7 @@ def fit_reduced_rank_regression_tikhonov(
         return U, V, sigma_sq
     else:
         return U, V
+
 
 def regularize(M: torch.Tensor, reg: float):
     """Regularize a matrix by adding a multiple of the identity matrix to it.

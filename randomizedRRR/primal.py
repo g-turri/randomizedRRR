@@ -13,7 +13,8 @@ def fit_reduced_rank_regression_tikhonov(
         C_XY: torch.Tensor,  # Cross-covariance matrix
         tikhonov_reg: float,  # Tikhonov regularization parameter, can be 0.0
         rank: int,  # Rank of the estimator
-        svd_solver: str = 'arnoldi'  # SVD solver to use. Arnoldi is faster for low ranks.
+        svd_solver: str = 'arnoldi',  # SVD solver to use. Arnoldi is faster for low ranks.
+        _return_singular_values: bool = False # Whether to return the singular values of the projector. (Development purposes)
 ):
     cuda = True if C_X.is_cuda else False
     dtype = C_X.dtype
@@ -28,17 +29,19 @@ def fit_reduced_rank_regression_tikhonov(
     else:
         values, vectors = eigh(tonp(_crcov, cuda), reg_input_covariance)
 
-
     top_eigs = topk(values, rank)
     vectors = vectors[:, top_eigs.indices]
-    values = top_eigs.values
+    # values = top_eigs.values
 
     _norms = weighted_norm(vectors, reg_input_covariance)
 
     _norms, vectors = frnp(_norms, device, dtype), frnp(vectors, device, dtype)
 
     vectors = vectors @ torch.diag(_norms ** (-1.0))
-    return vectors
+    if _return_singular_values:
+        return vectors, np.sort(values)[::-1]
+    else:
+        return vectors
 
 def fit_rand_reduced_rank_regression_tikhonov(
         C_X: torch.Tensor,  # Input covariance matrix
@@ -47,7 +50,8 @@ def fit_rand_reduced_rank_regression_tikhonov(
         rank: int,  # Rank of the estimator
         n_oversamples: int,  # Number of oversamples
         iterated_power: int,  # Number of power iterations
-        rng_seed: Optional[int] = None  # Random seed
+        rng_seed: Optional[int] = None,  # Random seed
+        _return_singular_values: bool = False # Whether to return the singular values of the projector. (Development purposes)
 ):
     cuda = True if C_X.is_cuda else False
     dtype = C_X.dtype
@@ -74,4 +78,8 @@ def fit_rand_reduced_rank_regression_tikhonov(
     _norms, vectors = frnp(_norms, device, dtype), frnp(vectors, device, dtype)
 
     vectors = vectors @ torch.diag(_norms ** (-1.0))
-    return sketch_p @ vectors[:, frnp(topk(values, rank).indices, device, dtype).to(dtype=torch.int)]
+    vectors = sketch_p @ vectors[:, frnp(topk(values, rank).indices, device, dtype).to(dtype=torch.int)]
+    if _return_singular_values:
+        return vectors, np.sort(values)[::-1]
+    else:
+        return vectors
