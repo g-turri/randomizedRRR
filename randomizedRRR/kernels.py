@@ -10,7 +10,7 @@ class BaseKernel(abc.ABC):
     def __call__(self, X: torch.Tensor, Y: Optional[torch.Tensor] = None):
         """
         Evaluate the kernel.
-        Returns a numpy array of shape (X.shape[0], Y.shape[0]).
+        Returns a torch tensor of shape (X.shape[0], Y.shape[0]).
         """
         pass
 
@@ -43,14 +43,21 @@ class BaseKernel(abc.ABC):
                 _r += f"{k}: {v} "
         return _r
 
-class LinearKernel(BaseKernel):
+class PolynomialKernel(BaseKernel):
     """
-        Linear Kernel
-        K(X, Y) = <X, Y>
+        Polynomial Kernel
+        K(x, y) = (a<x, y> + b)^p
+
+        where:
+        a = scale
+        b = bias
+        p = degree
     """
 
-    def __init__(self):
-        pass
+    def __init__(self, scale=1, bias=0, degree=2):
+        self.scale = scale
+        self.bias = bias
+        self.degree = degree
 
     @property
     def is_inf_dimensional(self):
@@ -60,12 +67,12 @@ class LinearKernel(BaseKernel):
         X = self._check_dims(X)
         Y = self._check_dims(Y)
         if Y is None:
-            K = X @ X.T
+            K = (self.scale * X@X.T + self.bias) ** self.degree
             if normalize:
                 D = torch.diag((K.diag() ** (1 / 2)) ** -1)
                 K = D @ K @ D
         else:
-            K = X @ Y.T
+            K = (self.scale * X@Y.T + self.bias) ** self.degree
             if normalize:
                 K_X = X @ X.T
                 D_row = torch.diag(1.0 / torch.sqrt(torch.diag(K_X)))
@@ -75,20 +82,15 @@ class LinearKernel(BaseKernel):
 
                 K = D_row @ K @ D_col
 
-        # m, n = K.shape
-        #
-        # # Calculate the diagonal matrix D for row normalization (assuming m < n)
-        # K_X = torch.diag(X @ X.T)
-        # D_row = torch.diag(1.0 / torch.sqrt(torch.diag(K_X)))
-        #
-        # # Calculate the diagonal matrix D for column normalization (assuming m < n)
-        # column_diagonal = torch.diag(K.T)
-        # D_column = torch.diag(1.0 / torch.sqrt(column_diagonal))
-        #
-        # # Normalize the kernel matrix using row and column normalization
-        # K_normalized = torch.mm(torch.mm(D_row, K), D_column) #torch.mm(torch.mm(K, D_row), D_column).shape
-
         return K
+
+class LinearKernel(PolynomialKernel):
+    """
+        Linear Kernel
+        K(X, Y) = <X, Y>
+    """
+    def __init__(self, scale=1, bias=0):
+        super().__init__(scale=scale, bias=bias, degree=1)
 
 class RBFKernel(BaseKernel):
     """
