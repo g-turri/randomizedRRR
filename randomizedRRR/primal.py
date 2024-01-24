@@ -1,6 +1,6 @@
 from typing import Optional
 import numpy as np
-from scipy.linalg import eigh
+from scipy.linalg import eigh, qr
 from scipy.sparse.linalg import eigsh
 from randomizedRRR.utils import topk, tonp, frnp
 from randomizedRRR.linalg import weighted_norm
@@ -66,7 +66,9 @@ def fit_rand_reduced_rank_regression_tikhonov(
     for _ in range(iterated_power):
         _tmp_sketch = cholesky_solve(sketch, cholesky(reg_input_covariance))
         sketch = _crcov @ _tmp_sketch
+        sketch, _ = qr(sketch, mode="economic")
 
+    sketch = frnp(sketch, dtype=dtype, device=device)
     sketch_p = cholesky_solve(sketch, cholesky(reg_input_covariance))
 
     F_0 = (sketch_p.T) @ sketch

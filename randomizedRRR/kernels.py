@@ -1,9 +1,7 @@
 import abc
 import logging
 from typing import Optional
-import numpy as np
 import torch
-from randomizedRRR.utils import tonp
 
 class BaseKernel(abc.ABC):
     @abc.abstractmethod
@@ -67,12 +65,12 @@ class PolynomialKernel(BaseKernel):
         X = self._check_dims(X)
         Y = self._check_dims(Y)
         if Y is None:
-            K = (self.scale * X@X.T + self.bias) ** self.degree
+            K = (torch.mul(X@X.T, self.scale) + self.bias) ** self.degree
             if normalize:
                 D = torch.diag((K.diag() ** (1 / 2)) ** -1)
                 K = D @ K @ D
         else:
-            K = (self.scale * X@Y.T + self.bias) ** self.degree
+            K = (torch.mul(X@Y.T, self.scale) + self.bias) ** self.degree
             if normalize:
                 K_X = X @ X.T
                 D_row = torch.diag(1.0 / torch.sqrt(torch.diag(K_X)))
@@ -104,6 +102,9 @@ class RBFKernel(BaseKernel):
     def is_inf_dimensional(self):
         return True
 
+    def _compute_sigma(self, X, Y):
+        return torch.median(torch.cdist(X, Y))
+
     def __call__(self, X, Y=None):
         X = self._check_dims(X)
         Y = self._check_dims(Y)
@@ -116,7 +117,7 @@ class RBFKernel(BaseKernel):
             Ynorm = torch.sum(Y ** 2, axis=-1)
 
         if self.sigma == None:
-            self.sigma = find_sigma_matern(X, Y)
+            self.sigma = self._compute_sigma(X, Y)
 
         A = Xnorm[:, None]
         B = Ynorm[None, :]
@@ -138,6 +139,9 @@ class MaternKernel(BaseKernel):
     def is_inf_dimensional(self):
         return True
 
+    def _compute_sigma(self, X, Y):
+        return torch.median(torch.cdist(X, Y))*2
+
     def __call__(self, X, Y=None):
         X = self._check_dims(X)
         Y = self._check_dims(Y)
@@ -150,7 +154,7 @@ class MaternKernel(BaseKernel):
             Ynorm = torch.sum(Y ** 2, axis=-1)
 
         if self.sigma == None:
-            self.sigma = find_sigma(X, Y)
+            self.sigma = self._compute_sigma(X, Y)
 
         A = Xnorm[:, None]
         B = Ynorm[None, :]
@@ -217,7 +221,7 @@ class CorrelationKernel(BaseKernel):
         X = self._check_dims(X)
         Y = self._check_dims(Y)
 
-        # Rowwise mean of input arrays & subtract from input arrays themeselves
+        # Rowwise mean of input arrays & subtract from input arrays themselves
         Xm = X - X.mean(0)[None, :]
         if Y is None:
             Ym = Xm
@@ -233,143 +237,3 @@ class CorrelationKernel(BaseKernel):
         r = torch.maximum(torch.minimum(r, torch.tensor(1.0)), torch.tensor(-1.0))
 
         return torch.exp(-self.gamma*(1-r))
-
-def find_sigma(x1, x2, n=1000):
-    '''Implementation of the median heuristic. See Gretton 2012
-       Pick sigma such that the exponent of exp(- ||x-y|| / (2*sigma2)),
-       in other words ||x-y|| / (2*sigma2),  equals 1 for the median distance x
-       and y of all distances between points from both data sets X and Y.
-    '''
-    cuda = True if x1.is_cuda else False
-    siz = torch.min((n, x1.shape[0], x2.shape[0]))
-    x1, x2 = x1[0:siz], x2[0:siz]
-
-    n, nfeatures = x1.shape
-    m, mfeatures = x2.shape
-
-    k1 = torch.sum((x1 * x1), 1)
-    q = torch.tile(k1, (m, 1)).T
-    del k1
-
-    k2 = torch.sum((x2 * x2), 1)
-    r = torch.tile(k2, (n, 1))
-    del k2
-
-    h = q + r
-    del q, r
-
-    # The norm
-    h = h - 2 * torch.mm(x1, x2.T)
-    h = torch.tensor(h, dtype=float)
-
-    mdist = torch.median(h.flatten())
-
-    sigma = (mdist / 2.0) ** (1/2)
-    if not sigma: sigma = 1
-
-    return tonp(sigma, cuda)
-
-def find_sigma_matern(x1, x2, n=1000):
-    '''Implementation of the median heuristic. See Gretton 2012
-       Pick sigma such that the exponent of exp(- ||x-y|| / (2*sigma2)),
-       in other words ||x-y|| / (2*sigma2),  equals 1 for the median distance x
-       and y of all distances between points from both data sets X and Y.
-    '''
-    cuda = True if x1.is_cuda else False
-    siz = torch.min((n, x1.shape[0], x2.shape[0]))
-    x1, x2 = x1[0:siz], x2[0:siz]
-
-    n, nfeatures = x1.shape
-    m, mfeatures = x2.shape
-
-    k1 = torch.sum((x1 * x1), 1)
-    q = torch.tile(k1, (m, 1)).T
-    del k1
-
-    k2 = torch.sum((x2 * x2), 1)
-    r = torch.tile(k2, (n, 1))
-    del k2
-
-    h = q + r
-    del q, r
-
-    # The norm
-    h = h - 2 * torch.mm(x1, x2.T)
-    h = torch.tensor(h, dtype=float)
-
-    mdist = torch.median(h.flatten()) ** (1/2)
-
-    sigma = mdist
-    if not sigma: sigma = 1
-
-    return tonp(sigma, cuda)
-
-def find_sigma(x1, x2, n=1000):
-    '''Implementation of the median heuristic. See Gretton 2012
-       Pick sigma such that the exponent of exp(- ||x-y|| / (2*sigma2)),
-       in other words ||x-y|| / (2*sigma2),  equals 1 for the median distance x
-       and y of all distances between points from both data sets X and Y.
-    '''
-    cuda = True if x1.is_cuda else False
-    siz = np.min((n, x1.shape[0], x2.shape[0]))
-    x1, x2 = x1[0:siz], x2[0:siz]
-
-    n, nfeatures = x1.shape
-    m, mfeatures = x2.shape
-
-    k1 = torch.sum((x1 * x1), 1)
-    q = torch.tile(k1, (m, 1)).T
-    del k1
-
-    k2 = torch.sum((x2 * x2), 1)
-    r = torch.tile(k2, (n, 1))
-    del k2
-
-    h = q + r
-    del q, r
-
-    # The norm
-    h = h - 2 * torch.mm(x1, x2.T)
-    h = torch.tensor(h, dtype=float)
-
-    mdist = torch.median(h.flatten())
-
-    sigma = (mdist / 2.0) ** (1/2)
-    if not sigma: sigma = 1
-
-    return tonp(sigma, cuda)
-
-def find_sigma_matern(x1, x2, n=1000):
-    '''Implementation of the median heuristic. See Gretton 2012
-       Pick sigma such that the exponent of exp(- ||x-y|| / (2*sigma2)),
-       in other words ||x-y|| / (2*sigma2),  equals 1 for the median distance x
-       and y of all distances between points from both data sets X and Y.
-    '''
-    cuda = True if x1.is_cuda else False
-    siz = np.min((n, x1.shape[0], x2.shape[0]))
-    x1, x2 = x1[0:siz], x2[0:siz]
-
-    n, nfeatures = x1.shape
-    m, mfeatures = x2.shape
-
-    k1 = torch.sum((x1 * x1), 1)
-    q = torch.tile(k1, (m, 1)).T
-    del k1
-
-    k2 = torch.sum((x2 * x2), 1)
-    r = torch.tile(k2, (n, 1))
-    del k2
-
-    h = q + r
-    del q, r
-
-    # The norm
-    h = h - 2 * torch.mm(x1, x2.T)
-    h = torch.tensor(h, dtype=float)
-
-    mdist = torch.median(h.flatten()) ** (1/2)
-
-    sigma = mdist
-    if not sigma: sigma = 1
-
-    return tonp(sigma, cuda)

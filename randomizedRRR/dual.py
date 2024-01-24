@@ -1,7 +1,7 @@
 from typing import Optional, Tuple
 import logging
 import numpy as np
-from scipy.linalg import eig, eigh, LinAlgError, pinvh
+from scipy.linalg import eig, eigh, LinAlgError, pinvh, qr
 from scipy.sparse.linalg import eigs
 from randomizedRRR.utils import topk, tonp, frnp
 from randomizedRRR.linalg import modified_QR
@@ -29,20 +29,23 @@ def fit_rand_reduced_rank_regression_tikhonov(
     inv_dim = dim ** (-1.0)
     alpha = dim * tikhonov_reg
     K_reg = regularize(K_X, tikhonov_reg)
+    K_reg_cholesky = cholesky(K_reg)
     l = rank + n_oversamples
     rng = np.random.default_rng(rng_seed)
     if optimal_sketching:
         Cov = inv_dim * K_Y
-        Om = torch.tensor(rng.multivariate_normal(np.zeros(dim), tonp(Cov, cuda), size=l).T, dtype=dtype, device=device)
+        Om = frnp(rng.multivariate_normal(np.zeros(dim), tonp(Cov, cuda), size=l).T, dtype=dtype, device=device)
     else:
-        Om = torch.tensor(rng.standard_normal(size=(dim, l)), dtype=dtype, device=device)
+        Om = frnp(rng.standard_normal(size=(dim, l)), dtype=dtype, device=device)
 
     for _ in range(iterated_power):
         # Powered randomized rangefinder
-        Omp = cholesky_solve(Om, cholesky(K_reg))
+        Omp = cholesky_solve(Om, K_reg_cholesky)
         Om = (inv_dim * K_Y) @ (Om - alpha * Omp)
+        Om, _ = qr(Om, mode="economic")
 
-    KOm = cholesky_solve(Om, cholesky(K_reg))
+    Om = frnp(Om, dtype=dtype, device=device)
+    KOm = cholesky_solve(Om, K_reg_cholesky)
     KOmp = Om - alpha * KOm
 
     F_0 = (Om.T @ KOmp)
